@@ -597,6 +597,7 @@ export class FuzzPanel {
  *     ${"`"}yarn add nanofuzz/runtime -D${"`"}
  *  1. Add an import to the top of the file:
  *     ${"`"}import { FuzzTestResult } from "nanofuzz/runtime";${"`"}`;
+
     // prettier-ignore
     const skeleton = `
 

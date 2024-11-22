@@ -806,7 +806,11 @@ export class ProgramDef {
    * @returns The TypeRef object for the given AST node
    */
   private _getTypeRefFromAstNode(
-    node: Identifier | TSPropertySignature | TSTypeAliasDeclaration
+    node:
+      | Identifier
+      | TSPropertySignature
+      | TSTypeAliasDeclaration
+      | TSTypeAnnotation
   ): TypeRef {
     // Throw an error if type annotations are missing
     if (node.typeAnnotation === undefined) {
@@ -1042,6 +1046,17 @@ export class ProgramDef {
               node.id.type === AST_NODE_TYPES.Identifier &&
               !isBlockScoped(node)
             ) {
+              // ReturnType is not as important for fuzzing, so we don't throw an error
+              // if we encounter something we don't support.
+              let returnType;
+              try {
+                returnType = this._getTypeRefFromAstNode(node.id);
+              } catch {
+                console.warn(
+                  'Unsupported return type for function "' + node.id.name + '".'
+                );
+                returnType = undefined;
+              }
               ret[node.id.name] = {
                 name: node.id.name,
                 module: this._module,
@@ -1057,6 +1072,7 @@ export class ProgramDef {
                 args: node.init.params
                   .filter((arg) => arg.type === AST_NODE_TYPES.Identifier)
                   .map((arg) => this._getTypeRefFromAstNode(arg as Identifier)),
+                returnType,
               };
             } else if (
               // Standard Function Definition: function xyz(): void => { ... }
@@ -1064,6 +1080,19 @@ export class ProgramDef {
               node.id !== null &&
               !isBlockScoped(node)
             ) {
+              // ReturnType is not as important for fuzzing, so we don't throw an error
+              // if we encounter something we don't support.
+              let returnType;
+              try {
+                returnType =
+                  node.returnType &&
+                  this._getTypeRefFromAstNode(node.returnType);
+              } catch {
+                console.warn(
+                  'Unsupported return type for function "' + node.id.name + '".'
+                );
+                returnType = undefined;
+              }
               ret[node.id.name] = {
                 name: node.id.name,
                 module: this._module,
@@ -1076,6 +1105,7 @@ export class ProgramDef {
                 args: node.params
                   .filter((arg) => arg.type === AST_NODE_TYPES.Identifier)
                   .map((arg) => this._getTypeRefFromAstNode(arg as Identifier)),
+                returnType,
               };
             }
           } catch (e: any) {
