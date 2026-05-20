@@ -178,12 +178,6 @@
             "default": true,
             "description": "Generate integers as numeric inputs by default?"
           },
-          "nanofuzz.argdef.numSigned": {
-            "title": "Generate signed inputs?",
-            "type": "boolean",
-            "default": false,
-            "description": "Generate signed values as numeric inputs by default?"
-          },
           "nanofuzz.argdef.dftDimLength.min": {
             "title": "Minimum array length",
             "type": "number",
