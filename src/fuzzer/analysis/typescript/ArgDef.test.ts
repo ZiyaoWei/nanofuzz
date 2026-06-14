@@ -742,6 +742,11 @@ function getRandomArgDef(
     case ArgTag.UNION: {
       break;
     }
+    case ArgTag.UNRESOLVED: {
+      throw new Error(
+        "ArgTag.UNRESOLVED is not a valid type for getRandomArgDef"
+      );
+    }
   }
   return new ArgDef<ArgType>(
     name,

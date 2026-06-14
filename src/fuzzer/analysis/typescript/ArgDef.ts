@@ -199,7 +199,7 @@ export class ArgDef<T extends ArgType> {
       case ArgTag.LITERAL:
       case ArgTag.UNION:
         return [];
-      default:
+      case ArgTag.UNRESOLVED:
         throw new Error(`Unsupported type: ${type}`);
     }
   } // fn: getDefaultIntervals()
@@ -480,6 +480,7 @@ export class ArgDef<T extends ArgType> {
       return this.typeRef;
     }
 
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
     switch (this.type) {
       case ArgTag.OBJECT: {
         // Literal object, no type. Recursively walk
