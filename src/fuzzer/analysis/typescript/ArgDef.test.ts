@@ -401,6 +401,23 @@ describe("fuzzer/analysis/typescript/ArgDef: getTypeAnnotation", () => {
     );
   });
 
+  it("type annotation for tuple w/o dimensions", () => {
+    const argDef = makeArgDef(
+      dummyModule,
+      "test",
+      0,
+      ArgTag.TUPLE,
+      argOptions,
+      0,
+      false,
+      [
+        makeTypeRef(dummyModule, "bool", ArgTag.BOOLEAN, 1),
+        makeTypeRef(dummyModule, "str", ArgTag.STRING, 0),
+      ]
+    );
+    expect(argDef.getTypeAnnotation()).toBe("[boolean[], string]");
+  });
+
   it("NoInput test", function () {
     const prng = seedrandom("qwertyuiop");
     /*
@@ -740,6 +757,9 @@ function getRandomArgDef(
       break;
     }
     case ArgTag.UNION: {
+      break;
+    }
+    case ArgTag.TUPLE: {
       break;
     }
     case ArgTag.UNRESOLVED: {
