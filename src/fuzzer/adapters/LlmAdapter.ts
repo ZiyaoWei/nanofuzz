@@ -5,6 +5,8 @@ import { FunctionDef } from "../analysis/typescript/FunctionDef";
 import * as nodellm from "@node-llm/core";
 import { isError } from "../Util";
 import * as telemetry from "../../telemetry/Telemetry";
+import * as zod from "zod";
+import { zodOutputFormat } from "./AnthropicUtils";
 
 /**
  * An adapter for chatting with an LLM about the program under test
@@ -74,7 +76,7 @@ export class LlmAdapter {
    */
   public async genInputs(
     fn: FunctionDef,
-    schema?: [Parameters<typeof this._chat.withSchema>[0], string[]]
+    schema?: [zod.ZodObject, string[]]
   ): Promise<{
     programInputs: { [k: string]: ArgValueType }[];
     stats?: Awaited<ReturnType<LlmAdapter["_query"]>>["stats"];
@@ -161,7 +163,7 @@ export class LlmAdapter {
    */
   private async _query(
     prompt: string[],
-    schema?: Parameters<typeof this._chat.withSchema>[0]
+    schema?: zod.ZodObject
   ): Promise<{
     response: string;
     stats: {
@@ -193,11 +195,21 @@ export class LlmAdapter {
       )
     );
 
-    const response = await (schema ? this._chat.withSchema(schema) : this._chat)
-      .withRequestOptions({
-        responseFormat: { type: "json_object" },
-      })
-      .ask(promptParts);
+    let chat = (
+      schema ? this._chat.withSchema(schema.toJSONSchema()) : this._chat
+    ).withRequestOptions({
+      responseFormat: { type: "json_object" },
+    });
+
+    if (schema) {
+      chat = chat.withParams({
+        output_config: {
+          format: zodOutputFormat(schema),
+        },
+      });
+    }
+
+    const response = await chat.ask(promptParts);
 
     vscode.commands.executeCommand(
       telemetry.commands.logTelemetry.name,
