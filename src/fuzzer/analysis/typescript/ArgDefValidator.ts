@@ -195,7 +195,7 @@ const traverse = (
 
   // Traverse the array and validate its contents
   for (const i in a) {
-    if (Array.isArray(a[i]) && currDepth < spec.getDim()) {
+    if (Array.isArray(a[i]) && currDepth + 1 < spec.getDim()) {
       if (!traverse(a[i], spec, currDepth + 1)) {
         return false; // next level of array is invalid
       }

@@ -5,6 +5,7 @@ import { ArgTag } from "./Types";
 
 const argOptions = ArgDef.getDefaultOptions();
 const dummyModule = "dummy.ts";
+
 const tupleDef = makeArgDef(
   dummyModule,
   "test",
@@ -30,6 +31,18 @@ describe("fuzzer/analysis/typescript/ArgDefValidator:", () => {
 
   it("Fails when tuple size doesn't match spec", () => {
     expect(ArgDefValidator.validate([[1]], tupleDef)).toBe(false);
+  });
+
+  it("Validates valid tuple array", () => {
+    expect(
+      ArgDefValidator.validate(
+        [[[1], "test"]],
+        makeArgDef(dummyModule, "test", 0, ArgTag.TUPLE, argOptions, 1, false, [
+          makeTypeRef(dummyModule, "number", ArgTag.NUMBER, 1),
+          makeTypeRef(dummyModule, "str", ArgTag.STRING, 0),
+        ])
+      )
+    ).toBe(true);
   });
 
   it("Validates valid arbitrary dimensional array", () => {
