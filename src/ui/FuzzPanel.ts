@@ -2985,6 +2985,28 @@ ${inArgConsts}
         // A literal typed input has only one possible value
         break;
 
+      // Tuple-specific Options
+      case fuzzer.ArgTag.TUPLE: {
+        // Output the array form prior to the child arguments.
+        // This seems odd, but the screen reads better to the user this way.
+        html += this._argDefArrayToHtmlForm(arg, idBase, disabledFlag);
+        html += `<div>`;
+        arg
+          .getChildren()
+          .forEach(
+            (child) =>
+              (html += this._argDefToHtmlForm(
+                child,
+                counter,
+                ", ",
+                "",
+                arg.getType()
+              ))
+          );
+        html += `</div>`;
+        break;
+      }
+
       case fuzzer.ArgTag.UNRESOLVED:
         throw new Error(
           `Cannot render an unresolved argument definition as an HTML form.`
