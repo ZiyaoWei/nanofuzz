@@ -182,16 +182,14 @@ export class LlmAdapter {
         text: e,
       });
     });
+
+    const provider = LlmAdapter._getConfig().provider;
     vscode.commands.executeCommand(
       telemetry.commands.logTelemetry.name,
       new telemetry.LoggerEntry(
         "LlmAdapter.query.send",
         "Sending query to LLM (v=%s;m=%s). Query: %s.",
-        [
-          LlmAdapter._getConfig().provider,
-          LlmAdapter._getConfig().modelName,
-          prompt.join("\n"),
-        ]
+        [provider, LlmAdapter._getConfig().modelName, prompt.join("\n")]
       )
     );
 
@@ -201,12 +199,16 @@ export class LlmAdapter {
       responseFormat: { type: "json_object" },
     });
 
-    if (schema) {
-      chat = chat.withParams({
-        output_config: {
-          format: zodOutputFormat(schema),
-        },
-      });
+    // Provider specific settings
+    if (provider === "anthropic") {
+      if (schema) {
+        // Anthropic doesn't always respect responseFormat
+        chat = chat.withParams({
+          output_config: {
+            format: zodOutputFormat(schema),
+          },
+        });
+      }
     }
 
     const response = await chat.ask(promptParts);
