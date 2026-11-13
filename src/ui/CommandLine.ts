@@ -40,6 +40,7 @@ import { InputSchedulerType } from "../fuzzer/schedulers/Types";
 import { FuzzConfigStore } from "../fuzzer/FuzzConfigStore";
 import { ConsoleIsolator } from "./ConsoleIsolator";
 import { runMcpServer, McpServerOptions } from "./McpServer";
+import { listTargets, TargetListResult } from "./Agent";
 import pkg from "../../package.json";
 
 const nanofuzzVersion = process.env.NANOFUZZ_VERSION ?? pkg.version;
@@ -72,6 +73,7 @@ function createProgram(): Commander.Command {
     .version(`NaNofuzz ${nanofuzzVersion}`)
     .argument(`<filename>`, `Module to test (or <file>::<fn>)`)
     .argument(`[function]`, `Function to test`)
+    .option(`--list`, `List the functions in <filename> that can be tested`)
 
     // -------------------------- Fuzzer Run Parameters -------------------------- //
 
@@ -423,14 +425,16 @@ export async function runCliInProcess(
 
     isolator.info(`NaNofuzz v${nanofuzzVersion}`);
 
+    const listOnly = program.opts()["list"] === true;
+
     let filenameIn: string;
-    let fnname: string;
+    let fnnameIn: string | undefined;
 
     if (program.args.length >= 1 && program.args[0].includes("::")) {
       const delimIdx = program.args[0].indexOf("::");
       filenameIn = program.args[0].slice(0, delimIdx);
-      fnname = program.args[0].slice(delimIdx + 2);
-      if (!filenameIn || !fnname) {
+      fnnameIn = program.args[0].slice(delimIdx + 2);
+      if (!filenameIn || !fnnameIn) {
         isolator.error(
           "Error: missing required arguments <filename> <function>"
         );
@@ -438,9 +442,18 @@ export async function runCliInProcess(
       }
     } else if (program.args.length >= 2) {
       filenameIn = program.args[0];
-      fnname = program.args[1];
+      fnnameIn = program.args[1];
+    } else if (program.args.length === 1 && listOnly) {
+      filenameIn = program.args[0];
     } else {
       isolator.error("Error: missing required arguments <filename> <function>");
+      return ERROR_USAGE;
+    }
+
+    if (listOnly && fnnameIn !== undefined) {
+      isolator.error(
+        `Error: --list takes a file, not a function (e.g. nanofuzz ${filenameIn} --list)`
+      );
       return ERROR_USAGE;
     }
 
@@ -462,6 +475,11 @@ export async function runCliInProcess(
       isolator.error(`Error: '${filenameIn}' is a directory, not a file.`);
       return ERROR_USAGE;
     }
+
+    if (fnnameIn === undefined) {
+      return await printTargetList(isolator, filenameIn, filename);
+    }
+    const fnname = fnnameIn;
 
     const options = program.opts();
 
@@ -1160,6 +1178,61 @@ export async function runCliInProcess(
 if (require.main === module) {
   runCliInProcess().then((code) => process.exit(code));
 }
+
+/**
+ * Prints which functions in a source file NaNofuzz can test (`--list`),
+ * and why any others cannot be tested.
+ *
+ * @param isolator Console isolator used for CLI output
+ * @param filenameIn File name as typed by the user (used in the usage hint)
+ * @param filename Resolved path of the file
+ * @returns CLI exit code
+ */
+async function printTargetList(
+  isolator: ConsoleIsolator,
+  filenameIn: string,
+  filename: string
+): Promise<number> {
+  let targets: TargetListResult;
+  try {
+    targets = await listTargets(filename);
+  } catch (e: unknown) {
+    isolator.error(
+      `Error: unable to analyze ${filenameIn}: ${isError(e) ? e.message : String(e)}`
+    );
+    return ERROR_INTERNAL;
+  }
+
+  const width = Math.max(
+    0,
+    ...targets.functions.map((fn) => fn.name.length),
+    ...targets.unsupportedFunctions.map((fn) => fn.name.length)
+  );
+
+  if (targets.functions.length === 0) {
+    isolator.log(
+      `No testable functions in ${filenameIn} (${targets.language})`
+    );
+  } else {
+    isolator.log(`Testable functions in ${filenameIn} (${targets.language}):`);
+    for (const fn of targets.functions) {
+      isolator.log(`  ${fn.name.padEnd(width)}  ${fn.signature}`);
+    }
+  }
+
+  if (targets.unsupportedFunctions.length > 0) {
+    isolator.log(`Not supported:`);
+    for (const fn of targets.unsupportedFunctions) {
+      const where = fn.argument ? `argument ${fn.argument}: ` : "";
+      isolator.log(`  ${fn.name.padEnd(width)}  ${where}${fn.reason}`);
+    }
+  }
+
+  if (targets.functions.length > 0) {
+    isolator.log(`Fuzz one with: nanofuzz ${filenameIn}::<function>`);
+  }
+  return EXIT_OK;
+} // fn: printTargetList
 
 // ---------------------------- Parameter Validators --------------------------- //
 

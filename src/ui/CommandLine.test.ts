@@ -271,6 +271,56 @@ describe("cli:", () => {
     );
   });
 
+  it("--list prints testable and unsupported functions without fuzzing", async () => {
+    const targetFile = path.join(tmpDir, "list_targets.ts");
+    fs.writeFileSync(
+      targetFile,
+      [
+        "export function add(a: number, b: number): number { return a + b; }",
+        "function helper(s: string): string { return s; }",
+        "export function apply(f: (x: number) => number, x: number): number { return f(x); }",
+      ].join("\n")
+    );
+
+    const res = await runCli([targetFile, "--list"]);
+
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain(`Testable functions in ${targetFile}`);
+    expect(res.stdout).toMatch(/add\s+function add\(a: number, b: number\)/);
+    expect(res.stdout).toMatch(/helper\s+function helper\(s: string\)/);
+    expect(res.stdout).toContain("Not supported:");
+    expect(res.stdout).toMatch(/apply\s+argument f: /);
+    expect(res.stdout).toContain(`nanofuzz ${targetFile}::<function>`);
+    expect(res.stdout).not.toContain("Target:");
+  });
+
+  it("--list reports when a file has no testable functions", async () => {
+    const targetFile = path.join(tmpDir, "list_empty.ts");
+    fs.writeFileSync(targetFile, "export const answer = 42;\n");
+
+    const res = await runCli([targetFile, "--list"]);
+
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain(`No testable functions in ${targetFile}`);
+    expect(res.stdout).not.toContain("Not supported:");
+  });
+
+  it("--list returns exit code 4 for a function name or a missing file", async () => {
+    const targetFile = "src/fuzzer/test_fixtures/Fuzzer.testfixtures.ts";
+
+    const res1 = await runCli([`${targetFile}::testCoverageOneFile`, "--list"]);
+    expect(res1.status).toBe(4);
+    expect(res1.stderr).toContain("Error: --list takes a file, not a function");
+
+    const res2 = await runCli([targetFile, "testCoverageOneFile", "--list"]);
+    expect(res2.status).toBe(4);
+    expect(res2.stderr).toContain("Error: --list takes a file, not a function");
+
+    const res3 = await runCli(["does/not/exist.ts", "--list"]);
+    expect(res3.status).toBe(4);
+    expect(res3.stderr).toContain("Error: file not found: does/not/exist.ts");
+  });
+
   it("--output-file: check matching parameters for TypeScript", async () => {
     const outputFile = path.join(tmpDir, "ts_output.json5");
     const targetFile = "src/fuzzer/test_fixtures/Fuzzer.testfixtures.ts";

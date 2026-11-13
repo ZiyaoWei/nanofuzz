@@ -75,6 +75,9 @@ nanofuzz [options] <filename>::<function>
 # Display help and all available options
 nanofuzz --help
 
+# List the functions in a file that NaNofuzz can test (and why others can't be)
+nanofuzz src/parser.ts --list
+
 # Run up to 5,000 tests and stop on the first failing input (default)
 nanofuzz src/parser.ts::parseExpr --max-tests 5000
 
@@ -103,11 +106,12 @@ nanofuzz src/lib.rs::my_unsafe_fn --rust-sanitizer borrow
 
 ### General Options
 
-| Option                  | Description                                     |
-| :---------------------- | :---------------------------------------------- |
-| `-h, --help`            | Display help and available command-line options |
-| `-V, --version`         | Output the version number                       |
-| `--clear-compile-cache` | Clear compiler cache before run                 |
+| Option                  | Description                                                      |
+| :---------------------- | :--------------------------------------------------------------- |
+| `-h, --help`            | Display help and available command-line options                  |
+| `-V, --version`         | Output the version number                                        |
+| `--list`                | List the functions in `<filename>` that can be tested, then exit |
+| `--clear-compile-cache` | Clear compiler cache before run                                  |
 
 ### Core Fuzzing Parameters
 

@@ -225,12 +225,13 @@ export async function listTargets(filePath: string): Promise<TargetListResult> {
     });
   }
 
-  const unsupportedFunctions: { name: string; reason: string }[] = [];
+  const unsupportedFunctions: TargetListResult["unsupportedFunctions"] = [];
   const unsupported = program.functionsNotSupported;
   for (const [name, info] of Object.entries(unsupported)) {
     unsupportedFunctions.push({
       name,
       reason: info.reason,
+      ...(info.argument !== undefined ? { argument: info.argument } : {}),
     });
   }
 
@@ -1897,7 +1898,7 @@ export type TargetListResult = {
   filePath: string;
   language: ProgramLanguage;
   functions: TargetFunction[];
-  unsupportedFunctions: { name: string; reason: string }[];
+  unsupportedFunctions: { name: string; reason: string; argument?: string }[];
 };
 
 /**
