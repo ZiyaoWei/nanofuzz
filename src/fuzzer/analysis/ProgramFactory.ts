@@ -150,6 +150,21 @@ export function getLanguage(details: {
 } // fn: getLanguage
 
 /**
+ * Returns true if the file is source code that NaNofuzz can analyze for
+ * test targets. Unlike `getLanguage()`, this does not fall back to TypeScript
+ * for unknown extensions, and it excludes declaration-only files (.d.ts, .mli).
+ *
+ * @param filename Path of the file
+ * @returns true if the file may contain functions NaNofuzz can test
+ */
+export function isSourceFile(filename: string): boolean {
+  if (filename.endsWith(".d.ts") || filename.endsWith(".mli")) {
+    return false;
+  }
+  return getLanguage({ filename }) !== "*";
+} // fn: isSourceFile
+
+/**
  * Resolves a file path using CommonJS/TS resolution first, falling back to path.resolve.
  *
  * @param filename Path of the source file to resolve

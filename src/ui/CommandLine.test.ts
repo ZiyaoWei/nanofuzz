@@ -84,7 +84,10 @@ async function runCli(
   try {
     Config.clearOverrides();
     const effectiveArgs = [...args];
+    // `nanofuzz list` does not fuzz, so it takes no fuzzing options
+    const isFuzzRun = effectiveArgs[0] !== "list";
     if (
+      isFuzzRun &&
       !effectiveArgs.includes("--workers") &&
       !effectiveArgs.includes("-w") &&
       !effectiveArgs.includes("--help") &&
@@ -95,6 +98,7 @@ async function runCli(
       effectiveArgs.push("--workers", "1");
     }
     if (
+      isFuzzRun &&
       !effectiveArgs.includes("--no-progress-bar") &&
       !effectiveArgs.includes("--help") &&
       !effectiveArgs.includes("-h") &&
@@ -271,54 +275,107 @@ describe("cli:", () => {
     );
   });
 
-  it("--list prints testable and unsupported functions without fuzzing", async () => {
-    const targetFile = path.join(tmpDir, "list_targets.ts");
-    fs.writeFileSync(
-      targetFile,
-      [
-        "export function add(a: number, b: number): number { return a + b; }",
-        "function helper(s: string): string { return s; }",
-        "export function apply(f: (x: number) => number, x: number): number { return f(x); }",
-      ].join("\n")
-    );
+  describe("list:", () => {
+    const skippedFn =
+      "export function shouldNotBeListed(x: number): number { return x; }\n";
+    let treeDir: string;
 
-    const res = await runCli([targetFile, "--list"]);
+    beforeAll(() => {
+      treeDir = path.join(tmpDir, "list_tree");
+      const write = (rel: string, text: string) => {
+        const file = path.join(treeDir, rel);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, text);
+      };
+      write(
+        "src/targets.ts",
+        [
+          "export interface Box { v: number }",
+          "export function add(a: number, b: number): number { return a + b; }",
+          "function helper(s: string): string { return s; }",
+          "export function apply(f: (x: number) => number, x: number): number { return f(x); }",
+          "export function boxed(n: number): Box | undefined { return n > 0 ? { v: n } : undefined; }",
+        ].join("\n")
+      );
+      write(
+        "src/nested/parse.py",
+        "def parse(s: str) -> int:\n    return int(s)\n"
+      );
+      write("src/constants.ts", "export const answer = 42;\n");
+      write("src/targets.test.ts", skippedFn);
+      write(
+        "src/types.d.ts",
+        "export declare function decl(x: number): number;\n"
+      );
+      write("src/notes.txt", "not source code\n");
+      write("node_modules/dep/index.ts", skippedFn);
+      write(".hidden/x.ts", skippedFn);
+      write("build/out.ts", skippedFn);
+    });
 
-    expect(res.status).toBe(0);
-    expect(res.stdout).toContain(`Testable functions in ${targetFile}`);
-    expect(res.stdout).toMatch(/add\s+function add\(a: number, b: number\)/);
-    expect(res.stdout).toMatch(/helper\s+function helper\(s: string\)/);
-    expect(res.stdout).toContain("Not supported:");
-    expect(res.stdout).toMatch(/apply\s+argument f: /);
-    expect(res.stdout).toContain(`nanofuzz ${targetFile}::<function>`);
-    expect(res.stdout).not.toContain("Target:");
-  });
+    it("searches directories recursively, skipping dependencies, build output, and tests", async () => {
+      const res = await runCli(["list", treeDir]);
 
-  it("--list reports when a file has no testable functions", async () => {
-    const targetFile = path.join(tmpDir, "list_empty.ts");
-    fs.writeFileSync(targetFile, "export const answer = 42;\n");
+      expect(res.status).toBe(0);
+      expect(res.stdout).toContain(
+        `${path.join(treeDir, "src", "targets.ts")} (typescript)`
+      );
+      expect(res.stdout).toMatch(/add\s+function add\(a: number, b: number\)/);
+      expect(res.stdout).toMatch(/helper\s+function helper\(s: string\)/);
+      expect(res.stdout).toMatch(/apply\s+not supported: argument f: /);
+      // A union return type must not hide the function (or the rest of the file)
+      expect(res.stdout).toMatch(/boxed\s+function boxed\(n: number\)/);
+      expect(res.stdout).toContain(
+        `${path.join(treeDir, "src", "nested", "parse.py")} (python)`
+      );
+      expect(res.stdout).toMatch(/parse\s+def parse\(/);
+      expect(res.stdout).toContain(
+        "Found 4 testable functions in 2 files (1 not supported)"
+      );
+      expect(res.stdout).toContain("nanofuzz <file>::<function>");
+      expect(res.stdout).not.toContain("shouldNotBeListed");
+      expect(res.stdout).not.toContain("decl");
+      expect(res.stdout).not.toContain("Target:");
+    });
 
-    const res = await runCli([targetFile, "--list"]);
+    it("lists a named file even inside a skipped directory", async () => {
+      const file = path.join(treeDir, "build", "out.ts");
+      const res = await runCli(["list", file]);
 
-    expect(res.status).toBe(0);
-    expect(res.stdout).toContain(`No testable functions in ${targetFile}`);
-    expect(res.stdout).not.toContain("Not supported:");
-  });
+      expect(res.status).toBe(0);
+      expect(res.stdout).toMatch(
+        /shouldNotBeListed\s+function shouldNotBeListed/
+      );
+      expect(res.stdout).toContain("Found 1 testable function in 1 file");
+      expect(res.stdout).toContain(`nanofuzz ${file}::<function>`);
+    });
 
-  it("--list returns exit code 4 for a function name or a missing file", async () => {
-    const targetFile = "src/fuzzer/test_fixtures/Fuzzer.testfixtures.ts";
+    it("reports when there are no testable functions", async () => {
+      const res = await runCli([
+        "list",
+        path.join(treeDir, "src", "constants.ts"),
+      ]);
 
-    const res1 = await runCli([`${targetFile}::testCoverageOneFile`, "--list"]);
-    expect(res1.status).toBe(4);
-    expect(res1.stderr).toContain("Error: --list takes a file, not a function");
+      expect(res.status).toBe(0);
+      expect(res.stdout).toContain("No testable functions found");
+    });
 
-    const res2 = await runCli([targetFile, "testCoverageOneFile", "--list"]);
-    expect(res2.status).toBe(4);
-    expect(res2.stderr).toContain("Error: --list takes a file, not a function");
+    it("returns exit code 4 for <file>::<function> or a missing path, 0 for --help", async () => {
+      const targetFile = "src/fuzzer/test_fixtures/Fuzzer.testfixtures.ts";
 
-    const res3 = await runCli(["does/not/exist.ts", "--list"]);
-    expect(res3.status).toBe(4);
-    expect(res3.stderr).toContain("Error: file not found: does/not/exist.ts");
+      const res1 = await runCli(["list", `${targetFile}::testCoverageOneFile`]);
+      expect(res1.status).toBe(4);
+      expect(res1.stderr).toContain(
+        "'nanofuzz list' takes files or directories, not <file>::<function>"
+      );
+
+      const res2 = await runCli(["list", "does/not/exist.ts"]);
+      expect(res2.status).toBe(4);
+      expect(res2.stderr).toContain("Error: file not found: does/not/exist.ts");
+
+      const res3 = await runCli(["list", "--help"]);
+      expect(res3.status).toBe(0);
+    });
   });
 
   it("--output-file: check matching parameters for TypeScript", async () => {

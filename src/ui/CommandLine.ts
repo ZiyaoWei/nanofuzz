@@ -73,7 +73,6 @@ function createProgram(): Commander.Command {
     .version(`NaNofuzz ${nanofuzzVersion}`)
     .argument(`<filename>`, `Module to test (or <file>::<fn>)`)
     .argument(`[function]`, `Function to test`)
-    .option(`--list`, `List the functions in <filename> that can be tested`)
 
     // -------------------------- Fuzzer Run Parameters -------------------------- //
 
@@ -312,11 +311,31 @@ function createProgram(): Commander.Command {
     .option(`--clear-compile-cache`, `Clear compiler cache before run`)
     .addHelpText(
       "after",
-      "\nCommands:\n  mcp [options]                                    Start the NaNofuzz Model Context Protocol (MCP) server\n"
+      "\nCommands:\n  list [paths...]                                  List testable functions in files or directories (recursive)\n  mcp [options]                                    Start the NaNofuzz Model Context Protocol (MCP) server\n"
     );
 
   return program;
 } // fn: createProgram
+
+/**
+ * Creates and configures the Commander Command instance for the `list` subcommand.
+ *
+ * @returns Configured Commander.Command instance for `nanofuzz list`
+ */
+function createListProgram(): Commander.Command {
+  const program = new Commander.Command();
+  program
+    .name("nanofuzz list")
+    .description(
+      "List the functions NaNofuzz can test, and why others cannot be tested"
+    )
+    .argument(
+      "[paths...]",
+      "Files or directories to list; directories are searched recursively (default: .)"
+    );
+
+  return program;
+} // fn: createListProgram
 
 /**
  * Creates and configures the Commander Command instance for the `mcp` subcommand.
@@ -370,6 +389,194 @@ function createMcpProgram(): Commander.Command {
   return program;
 } // fn: createMcpProgram
 
+// ------------------------------- list Command -------------------------------- //
+
+/**
+ * Directory names that `nanofuzz list` does not descend into: dependencies,
+ * virtual environments, and build output. Hidden directories (".git",
+ * ".venv", ...) are skipped too. A path named on the command line is always
+ * listed, even if it matches one of these.
+ */
+const LIST_SKIPPED_DIRS = new Set([
+  "node_modules",
+  "__pycache__",
+  "venv",
+  "site-packages",
+  "target",
+  "_build",
+  "build",
+  "dist",
+  "out",
+  "vendor",
+]);
+
+/**
+ * Test files that `nanofuzz list` skips while searching directories, using
+ * the default naming conventions of Jest/Vitest, pytest, and Maven Surefire.
+ * (Go test files are already excluded by `ProgramFactory.isSourceFile()`.)
+ */
+const LIST_SKIPPED_FILES = [
+  /\.(test|spec)\.ts$/,
+  /^test_.*\.py$/,
+  /_test\.py$/,
+  /^conftest\.py$/,
+  /^Test.*\.java$/,
+  /(Test|Tests|TestCase)\.java$/,
+];
+
+/** Longest reason `nanofuzz list` prints for a function it cannot test */
+const LIST_MAX_REASON_LENGTH = 160;
+
+/**
+ * Finds the source files under `root` that NaNofuzz can analyze. A file is
+ * returned as-is; a directory is searched recursively, skipping hidden,
+ * dependency, and build directories and test files, and not following
+ * symbolic links.
+ *
+ * @param root File or directory path
+ * @returns Absolute paths of source files, sorted
+ */
+export function findSourceFiles(root: string): string[] {
+  const absRoot = path.resolve(root);
+  if (!fs.statSync(absRoot).isDirectory()) {
+    return [absRoot];
+  }
+
+  const found: string[] = [];
+  const walk = (dir: string) => {
+    const entries = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!entry.name.startsWith(".") && !LIST_SKIPPED_DIRS.has(entry.name)) {
+          walk(entryPath);
+        }
+      } else if (
+        entry.isFile() &&
+        ProgramFactory.isSourceFile(entry.name) &&
+        !LIST_SKIPPED_FILES.some((pattern) => pattern.test(entry.name))
+      ) {
+        found.push(entryPath);
+      }
+    }
+  };
+  walk(absRoot);
+  return found;
+} // fn: findSourceFiles
+
+/**
+ * Runs `nanofuzz list [paths...]`: prints the functions NaNofuzz can test in
+ * each file, and why any others cannot be tested.
+ *
+ * @param isolator Console isolator used for CLI output
+ * @param paths Files or directories to list (directories are recursive)
+ * @returns CLI exit code
+ */
+async function runListCommand(
+  isolator: ConsoleIsolator,
+  paths: string[]
+): Promise<number> {
+  // Validate every path before printing anything
+  for (const p of paths) {
+    if (p.includes("::")) {
+      isolator.error(
+        `Error: 'nanofuzz list' takes files or directories, not <file>::<function>: ${p}`
+      );
+      return ERROR_USAGE;
+    }
+    if (!fs.existsSync(p)) {
+      isolator.error(`Error: file not found: ${p}`);
+      return ERROR_USAGE;
+    }
+  }
+
+  // Show paths relative to the working directory when they are inside it,
+  // so that they can be pasted into `nanofuzz <file>::<function>`
+  const displayPath = (file: string) => {
+    const rel = path.relative(process.cwd(), file);
+    return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : file;
+  };
+
+  // Keep each function to one line: some reasons embed multi-line AST dumps.
+  // `nanofuzz <file>::<function>` prints the full reason.
+  const oneLine = (text: string) => {
+    const flat = text.replace(/\s+/g, " ").trim();
+    return flat.length > LIST_MAX_REASON_LENGTH
+      ? `${flat.slice(0, LIST_MAX_REASON_LENGTH - 1)}…`
+      : flat;
+  };
+
+  const files = [...new Set(paths.flatMap((p) => findSourceFiles(p)))];
+  const filesWithTargets: string[] = [];
+  let testableCount = 0;
+  let unsupportedCount = 0;
+  let errorCount = 0;
+
+  for (const file of files) {
+    let targets: TargetListResult;
+    try {
+      targets = await listTargets(file);
+    } catch (e: unknown) {
+      errorCount++;
+      isolator.error(
+        `Error: unable to analyze ${displayPath(file)}: ${oneLine(isError(e) ? e.message : String(e))}`
+      );
+      continue;
+    }
+    if (
+      targets.functions.length === 0 &&
+      targets.unsupportedFunctions.length === 0
+    ) {
+      continue; // nothing to report for this file
+    }
+
+    const width = Math.max(
+      ...targets.functions.map((fn) => fn.name.length),
+      ...targets.unsupportedFunctions.map((fn) => fn.name.length)
+    );
+    isolator.log(`${displayPath(file)} (${targets.language})`);
+    for (const fn of targets.functions) {
+      isolator.log(`  ${fn.name.padEnd(width)}  ${fn.signature}`);
+    }
+    for (const fn of targets.unsupportedFunctions) {
+      const where = fn.argument ? `argument ${fn.argument}: ` : "";
+      isolator.log(
+        `  ${fn.name.padEnd(width)}  not supported: ${oneLine(where + fn.reason)}`
+      );
+    }
+
+    testableCount += targets.functions.length;
+    unsupportedCount += targets.unsupportedFunctions.length;
+    if (targets.functions.length > 0) {
+      filesWithTargets.push(file);
+    }
+  }
+
+  const plural = (n: number, word: string) =>
+    `${n} ${word}${n === 1 ? "" : "s"}`;
+  const notes = [
+    ...(unsupportedCount ? [`${unsupportedCount} not supported`] : []),
+    ...(errorCount ? [`${plural(errorCount, "file")} not analyzed`] : []),
+  ];
+  isolator.log(
+    (testableCount > 0
+      ? `Found ${plural(testableCount, "testable function")} in ${plural(filesWithTargets.length, "file")}`
+      : `No testable functions found`) +
+      (notes.length ? ` (${notes.join(", ")})` : "")
+  );
+  if (filesWithTargets.length > 0) {
+    const fileHint =
+      filesWithTargets.length === 1
+        ? displayPath(filesWithTargets[0])
+        : "<file>";
+    isolator.log(`Fuzz one with: nanofuzz ${fileHint}::<function>`);
+  }
+
+  return errorCount > 0 ? ERROR_INTERNAL : EXIT_OK;
+} // fn: runListCommand
+
 export async function runCliInProcess(
   args: string[] = process.argv.slice(2)
 ): Promise<number> {
@@ -404,6 +611,30 @@ export async function runCliInProcess(
       return EXIT_OK;
     }
 
+    if (args.length > 0 && args[0] === "list") {
+      const listProgram = createListProgram();
+      listProgram.exitOverride((_err: Commander.CommanderError) => {
+        throw _err;
+      });
+
+      try {
+        isolator.asCli(() => {
+          listProgram.parse(args.slice(1), { from: "user" });
+        });
+      } catch (_e: unknown) {
+        if (_e instanceof Commander.CommanderError && _e.exitCode === 0) {
+          return EXIT_OK;
+        }
+        return ERROR_USAGE;
+      }
+
+      isolator.info(`NaNofuzz v${nanofuzzVersion}`);
+      return await runListCommand(
+        isolator,
+        listProgram.args.length > 0 ? listProgram.args : ["."]
+      );
+    }
+
     const program = createProgram();
 
     program.exitOverride((_err: Commander.CommanderError) => {
@@ -425,16 +656,14 @@ export async function runCliInProcess(
 
     isolator.info(`NaNofuzz v${nanofuzzVersion}`);
 
-    const listOnly = program.opts()["list"] === true;
-
     let filenameIn: string;
-    let fnnameIn: string | undefined;
+    let fnname: string;
 
     if (program.args.length >= 1 && program.args[0].includes("::")) {
       const delimIdx = program.args[0].indexOf("::");
       filenameIn = program.args[0].slice(0, delimIdx);
-      fnnameIn = program.args[0].slice(delimIdx + 2);
-      if (!filenameIn || !fnnameIn) {
+      fnname = program.args[0].slice(delimIdx + 2);
+      if (!filenameIn || !fnname) {
         isolator.error(
           "Error: missing required arguments <filename> <function>"
         );
@@ -442,18 +671,9 @@ export async function runCliInProcess(
       }
     } else if (program.args.length >= 2) {
       filenameIn = program.args[0];
-      fnnameIn = program.args[1];
-    } else if (program.args.length === 1 && listOnly) {
-      filenameIn = program.args[0];
+      fnname = program.args[1];
     } else {
       isolator.error("Error: missing required arguments <filename> <function>");
-      return ERROR_USAGE;
-    }
-
-    if (listOnly && fnnameIn !== undefined) {
-      isolator.error(
-        `Error: --list takes a file, not a function (e.g. nanofuzz ${filenameIn} --list)`
-      );
       return ERROR_USAGE;
     }
 
@@ -475,11 +695,6 @@ export async function runCliInProcess(
       isolator.error(`Error: '${filenameIn}' is a directory, not a file.`);
       return ERROR_USAGE;
     }
-
-    if (fnnameIn === undefined) {
-      return await printTargetList(isolator, filenameIn, filename);
-    }
-    const fnname = fnnameIn;
 
     const options = program.opts();
 
@@ -1178,61 +1393,6 @@ export async function runCliInProcess(
 if (require.main === module) {
   runCliInProcess().then((code) => process.exit(code));
 }
-
-/**
- * Prints which functions in a source file NaNofuzz can test (`--list`),
- * and why any others cannot be tested.
- *
- * @param isolator Console isolator used for CLI output
- * @param filenameIn File name as typed by the user (used in the usage hint)
- * @param filename Resolved path of the file
- * @returns CLI exit code
- */
-async function printTargetList(
-  isolator: ConsoleIsolator,
-  filenameIn: string,
-  filename: string
-): Promise<number> {
-  let targets: TargetListResult;
-  try {
-    targets = await listTargets(filename);
-  } catch (e: unknown) {
-    isolator.error(
-      `Error: unable to analyze ${filenameIn}: ${isError(e) ? e.message : String(e)}`
-    );
-    return ERROR_INTERNAL;
-  }
-
-  const width = Math.max(
-    0,
-    ...targets.functions.map((fn) => fn.name.length),
-    ...targets.unsupportedFunctions.map((fn) => fn.name.length)
-  );
-
-  if (targets.functions.length === 0) {
-    isolator.log(
-      `No testable functions in ${filenameIn} (${targets.language})`
-    );
-  } else {
-    isolator.log(`Testable functions in ${filenameIn} (${targets.language}):`);
-    for (const fn of targets.functions) {
-      isolator.log(`  ${fn.name.padEnd(width)}  ${fn.signature}`);
-    }
-  }
-
-  if (targets.unsupportedFunctions.length > 0) {
-    isolator.log(`Not supported:`);
-    for (const fn of targets.unsupportedFunctions) {
-      const where = fn.argument ? `argument ${fn.argument}: ` : "";
-      isolator.log(`  ${fn.name.padEnd(width)}  ${where}${fn.reason}`);
-    }
-  }
-
-  if (targets.functions.length > 0) {
-    isolator.log(`Fuzz one with: nanofuzz ${filenameIn}::<function>`);
-  }
-  return EXIT_OK;
-} // fn: printTargetList
 
 // ---------------------------- Parameter Validators --------------------------- //
 

@@ -67,16 +67,45 @@ nanofuzz src/math.ts::add
 
 ```bash
 nanofuzz [options] <filename>::<function>
+nanofuzz list [paths...]
 ```
+
+### Finding Functions to Test
+
+`nanofuzz list` shows which functions NaNofuzz can test, with their signatures, and why any others can't be tested:
+
+```bash
+# Every source file under the current directory
+nanofuzz list
+
+# A directory (searched recursively) or a single file
+nanofuzz list src/
+nanofuzz list src/parser.ts
+```
+
+```
+src/parser.ts (typescript)
+  parseExpr  function parseExpr(input: string)
+  tokenize   function tokenize(input: string, strict?: boolean)
+  visit      not supported: argument cb: ...
+Found 2 testable functions in 1 file (1 not supported)
+Fuzz one with: nanofuzz src/parser.ts::<function>
+```
+
+When searching a directory, `nanofuzz list` skips:
+
+- hidden directories (such as `.git` and `.venv`)
+- dependency and build directories: `node_modules`, `__pycache__`, `venv`, `site-packages`, `target`, `_build`, `build`, `dist`, `out`, and `vendor`
+- test files (`*.test.ts`, `*.spec.ts`, `test_*.py`, `*_test.py`, `conftest.py`, `*_test.go`, `Test*.java`, `*Test.java`, `*Tests.java`, `*TestCase.java`)
+- declaration files (`.d.ts` and `.mli`)
+
+A file or directory you name on the command line is always listed. Long reasons are shortened to one line; run `nanofuzz <file>::<function>` to see the full reason. `nanofuzz list` exits with `3` if any file could not be analyzed.
 
 ### Examples
 
 ```bash
 # Display help and all available options
 nanofuzz --help
-
-# List the functions in a file that NaNofuzz can test (and why others can't be)
-nanofuzz src/parser.ts --list
 
 # Run up to 5,000 tests and stop on the first failing input (default)
 nanofuzz src/parser.ts::parseExpr --max-tests 5000
@@ -106,12 +135,11 @@ nanofuzz src/lib.rs::my_unsafe_fn --rust-sanitizer borrow
 
 ### General Options
 
-| Option                  | Description                                                      |
-| :---------------------- | :--------------------------------------------------------------- |
-| `-h, --help`            | Display help and available command-line options                  |
-| `-V, --version`         | Output the version number                                        |
-| `--list`                | List the functions in `<filename>` that can be tested, then exit |
-| `--clear-compile-cache` | Clear compiler cache before run                                  |
+| Option                  | Description                                     |
+| :---------------------- | :---------------------------------------------- |
+| `-h, --help`            | Display help and available command-line options |
+| `-V, --version`         | Output the version number                       |
+| `--clear-compile-cache` | Clear compiler cache before run                 |
 
 ### Core Fuzzing Parameters
 
