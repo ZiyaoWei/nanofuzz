@@ -181,51 +181,70 @@ export async function listTargets(filePath: string): Promise<TargetListResult> {
   const language = program.lang;
   const allFunctions = program.functions;
   const functions: TargetFunction[] = [];
+  const unsupportedFunctions: TargetListResult["unsupportedFunctions"] = [];
+  const fnNames = Object.keys(program.functions);
+
+  // Templates are a convenience. If one cannot be built (e.g., the return
+  // type is a union that includes a named type), omit it instead of failing
+  // the whole file: the function itself can still be fuzzed.
+  const tryTemplate = (build: () => { fullTemplate: string }) => {
+    try {
+      return build().fullTemplate;
+    } catch {
+      return undefined;
+    }
+  };
 
   for (const fnDef of Object.values(allFunctions)) {
-    const argDefs = fnDef.getArgDefs();
-    const args: TargetFunctionArg[] = argDefs.map((arg) => ({
-      name: arg.getName(),
-      type: formatArgDefType(arg),
-      optional: arg.isOptional(),
-      isConstant: arg.isConstant(),
-      constantValue: arg.isConstant() ? arg.getConstantValue() : undefined,
-    }));
+    let target: TargetFunction;
+    try {
+      const argDefs = fnDef.getArgDefs();
+      const args: TargetFunctionArg[] = argDefs.map((arg) => ({
+        name: arg.getName(),
+        type: formatArgDefType(arg),
+        optional: arg.isOptional(),
+        isConstant: arg.isConstant(),
+        constantValue: arg.isConstant() ? arg.getConstantValue() : undefined,
+      }));
 
-    const valSkel = synthesizeValidator(
-      fnDef,
-      language,
-      Object.keys(program.functions)
-    );
-    const transSkel = synthesizeTransformer(
-      fnDef,
-      language,
-      Object.keys(program.functions)
-    );
-    const genSkel = synthesizeUserGenerator(
-      fnDef,
-      language,
-      Object.keys(program.functions)
-    );
+      target = {
+        name: fnDef.getName(),
+        signature: formatFunctionSignature(fnDef, language),
+        isExported: fnDef.isExported(),
+        args,
+        returnType: fnDef.getReturnType()?.name,
+        isVoid: fnDef.isVoid(),
+        ...(fnDef.isAsync() ? { isAsync: true } : {}),
+        startOffset: fnDef.getStartOffset(),
+        endOffset: fnDef.getEndOffset(),
+        comment: fnDef.getCmt(),
+      };
+    } catch (e: unknown) {
+      // Report this function instead of failing the whole file
+      unsupportedFunctions.push({
+        name: fnDef.getName(),
+        reason: isError(e) ? e.message : String(e),
+      });
+      continue;
+    }
 
+    const validatorTemplate = tryTemplate(() =>
+      synthesizeValidator(fnDef, language, fnNames)
+    );
+    const transformerTemplate = tryTemplate(() =>
+      synthesizeTransformer(fnDef, language, fnNames)
+    );
+    const generatorTemplate = tryTemplate(() =>
+      synthesizeUserGenerator(fnDef, language, fnNames)
+    );
     functions.push({
-      name: fnDef.getName(),
-      signature: formatFunctionSignature(fnDef, language),
-      isExported: fnDef.isExported(),
-      args,
-      returnType: fnDef.getReturnType()?.name,
-      isVoid: fnDef.isVoid(),
-      ...(fnDef.isAsync() ? { isAsync: true } : {}),
-      startOffset: fnDef.getStartOffset(),
-      endOffset: fnDef.getEndOffset(),
-      comment: fnDef.getCmt(),
-      validatorTemplate: valSkel.fullTemplate,
-      transformerTemplate: transSkel.fullTemplate,
-      generatorTemplate: genSkel.fullTemplate,
+      ...target,
+      ...(validatorTemplate !== undefined ? { validatorTemplate } : {}),
+      ...(transformerTemplate !== undefined ? { transformerTemplate } : {}),
+      ...(generatorTemplate !== undefined ? { generatorTemplate } : {}),
     });
   }
 
-  const unsupportedFunctions: TargetListResult["unsupportedFunctions"] = [];
   const unsupported = program.functionsNotSupported;
   for (const [name, info] of Object.entries(unsupported)) {
     unsupportedFunctions.push({

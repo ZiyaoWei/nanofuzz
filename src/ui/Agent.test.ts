@@ -266,6 +266,33 @@ describe("Agent", () => {
     ).toBeRejectedWithError(/does not exist/);
   });
 
+  it("listTargets: keeps a function whose templates cannot be built, and the rest of the file", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nanofuzz-list-"));
+    try {
+      const file = path.join(dir, "union_return.ts");
+      fs.writeFileSync(
+        file,
+        [
+          "export interface Box { v: number }",
+          "export function boxed(n: number): Box | undefined { return n > 0 ? { v: n } : undefined; }",
+          "export function inc(n: number): number { return n + 1; }",
+          "export function apply(f: (x: number) => number, x: number): number { return f(x); }",
+        ].join("\n")
+      );
+
+      const result = await listTargets(file);
+
+      expect(result.functions.map((fn) => fn.name)).toEqual(["boxed", "inc"]);
+      const inc = result.functions.find((fn) => fn.name === "inc");
+      expect(inc?.validatorTemplate).toBeDefined();
+      expect(result.unsupportedFunctions).toEqual([
+        jasmine.objectContaining({ name: "apply", argument: "f" }),
+      ]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("getToolName: dynamic", () => {
     Config.override("nanofuzz.name", "CustomFuzzBot");
     expect(getToolName()).toBe("CustomFuzzBot");
