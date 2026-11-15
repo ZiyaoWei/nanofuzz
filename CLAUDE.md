@@ -18,6 +18,10 @@
   one source of truth), but don't extract shared helpers before a second user
   exists. Keep language-specific helpers next to their only user; `Util.ts` is
   for language-neutral helpers.
+- Don't add code for cases that don't come up in practice (e.g.,
+  `Optional[None]`); note the gap in a comment instead.
+- Check what the code means, not how it is spelled: e.g., whether a type
+  resolves to None, not whether its text is `None`.
 
 ## Code comments and docs
 
@@ -30,6 +34,8 @@
   case. Drop examples and comments that add nothing.
 - Explain motivation: what something is for, then why it is done that way.
 - No magic constants: name values (e.g., positional arguments) where parsed.
+- Lead with the short statement (e.g., `Optional[T]` = `T | None`); put less
+  important caveats in a separate `Note:`, after an empty `//` line.
 
 ## Tests
 
@@ -38,6 +44,9 @@
 - Each test must fail without its fix: prove it by running it against the old
   code, or by breaking the rule and seeing exactly that test fail.
 - Build test fixtures from one file list or map; it needs no tree comment.
+- When a change makes an existing test case wrong, make the smallest edit that
+  keeps what the case was for (e.g., change `Optional` to `Union`), rather than
+  deleting the case or rewording its comment.
 
 ## Commits and PRs
 
