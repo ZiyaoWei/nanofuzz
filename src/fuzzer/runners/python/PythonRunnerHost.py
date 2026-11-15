@@ -382,9 +382,12 @@ def loadPythonFn(filename: str, modulename: str, fn: str) -> Tuple[Union[RunnerE
         ), None)
 
 
+# Same key as PlaceHolderBigIntKey in src/Jsonn.ts
+PlaceHolderBigIntKey = "____JSONN____61581952310____BIGINT____"
+
+
 def unwrap_jsonn(val: Any) -> Any:
     PlaceHolderValueKey = "____JSONN____61581952310____VALUE____"
-    PlaceHolderBigIntKey = "____JSONN____61581952310____BIGINT____"
     PlaceHolderUint8ArrayKey = "____JSONN____61581952310____UINT8ARRAY____"
     PlaceHolderMapKey = "____JSONN____61581952310____MAP____"
     PlaceHolderSetKey = "____JSONN____61581952310____SET____"
@@ -877,6 +880,11 @@ def default_serializer(obj: Any) -> Any:
         return list(obj)
     if isinstance(obj, uuid.UUID):
         return str(obj)
+    if isinstance(obj, int):
+        # msgpack only encodes 64-bit ints and passes larger ones here. Wrap
+        # them in the JSONN BigInt placeholder, which NaNofuzz revives as a
+        # BigInt: e.g., 2 ** 100 becomes 1267650600228229401496703205376n.
+        return {PlaceHolderBigIntKey: str(obj)}
     raise TypeError(
         f"Object of type {type(obj).__name__} is not serializable")
 

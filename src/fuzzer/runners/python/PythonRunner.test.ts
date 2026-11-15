@@ -428,6 +428,56 @@ def translation():
     }
   });
 
+  it("returns integers beyond 64 bits as BigInts", async () => {
+    const tmpDir = getTmpDir("nanofuzz-runner-");
+    const pyPath = path.join(tmpDir, "big_int_test.py");
+    const pyCode = `
+def big():
+    return [2 ** 100, -(2 ** 70)]
+`;
+    fs.writeFileSync(pyPath, pyCode);
+
+    try {
+      const srcCode = `
+def big():
+    pass
+`;
+      const program = ProgramFactory.fromSource(
+        () => srcCode,
+        "python",
+        pyPath
+      );
+      const fnDef = program.functionsExported["big"];
+      const env = createFuzzEnv(fnDef);
+
+      const runner = new PythonRunner(pyPath, "big", env);
+      await runner.onRunStart();
+
+      const res = await runner.run([], 10000);
+
+      await runner.onRunEnd();
+
+      expect(res.result.tag).toBe("value");
+      if (res.result.tag === "value") {
+        expect(res.result.value).toEqual([
+          BigInt("1267650600228229401496703205376"),
+          BigInt("-1180591620717411303424"),
+        ]);
+      }
+    } finally {
+      try {
+        fs.rmSync(tmpDir, {
+          recursive: true,
+          force: true,
+          maxRetries: 10,
+          retryDelay: 100,
+        });
+      } catch {
+        // Ignore residual file lock cleanup errors on Windows
+      }
+    }
+  });
+
   it("handles NaN and Infinity float numbers passed as strings", async () => {
     const tmpDir = getTmpDir("nanofuzz-runner-");
     const pyPath = path.join(tmpDir, "float_test.py");
