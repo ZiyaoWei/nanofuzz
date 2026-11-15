@@ -823,6 +823,19 @@ def test_something(x: int):
     expect(fn.getReturnType()?.type?.type).toEqual(ArgTag.UNION);
   });
 
+  it("reports a type name that is not defined or imported", () => {
+    const program = ProgramFactory.fromSource(
+      () => `def f(x: Missing) -> None:
+    pass`,
+      "python"
+    );
+
+    expect(program.functionsExported["f"]).toBeUndefined();
+    expect(program.functionsNotSupported["f"].reason).toMatch(
+      /^Unknown type 'Missing' in module '.*': not a supported type, a type alias, or an import$/
+    );
+  });
+
   it("finds decorated functions without changing their signature", () => {
     // Decorators do not change the argument or return annotations seen by the
     // parser, even when the decorator itself cannot be resolved here.
