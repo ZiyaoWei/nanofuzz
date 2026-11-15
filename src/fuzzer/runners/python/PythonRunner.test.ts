@@ -376,6 +376,58 @@ def process_data(t: tuple[int, str], d: dict[int, str]):
     }
   });
 
+  it("returns outputs msgpack can't encode as their str()", async () => {
+    const tmpDir = getTmpDir("nanofuzz-runner-");
+    const pyPath = path.join(tmpDir, "unencodable_output_test.py");
+    const pyCode = `import gettext
+
+def translation():
+    return gettext.NullTranslations()
+`;
+    fs.writeFileSync(pyPath, pyCode);
+
+    try {
+      const srcCode = `
+def translation():
+    pass
+`;
+      const program = ProgramFactory.fromSource(
+        () => srcCode,
+        "python",
+        pyPath
+      );
+      const fnDef = program.functionsExported["translation"];
+      const env = createFuzzEnv(fnDef);
+
+      const runner = new PythonRunner(pyPath, "translation", env);
+      await runner.onRunStart();
+
+      const res = await runner.run([], 10000);
+
+      await runner.onRunEnd();
+
+      expect(res.result.tag).toBe("value");
+      if (res.result.tag === "value") {
+        // CPython prints the address with the C library's %p, whose hex
+        // digits are uppercase on some platforms (e.g., Windows)
+        expect(res.result.value).toMatch(
+          /^<gettext\.NullTranslations object at 0x[0-9a-fA-F]+>$/
+        );
+      }
+    } finally {
+      try {
+        fs.rmSync(tmpDir, {
+          recursive: true,
+          force: true,
+          maxRetries: 10,
+          retryDelay: 100,
+        });
+      } catch {
+        // Ignore residual file lock cleanup errors on Windows
+      }
+    }
+  });
+
   it("handles NaN and Infinity float numbers passed as strings", async () => {
     const tmpDir = getTmpDir("nanofuzz-runner-");
     const pyPath = path.join(tmpDir, "float_test.py");

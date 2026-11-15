@@ -858,7 +858,16 @@ def sanitize_output(obj: Any) -> Any:
                 s_k = str(s_k)
             res[s_k] = sanitize_output(v)
         return res
-    return obj
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    # msgpack can't encode any other value (e.g., a class instance), and the
+    # host would crash sending one, so send the value's str() instead: e.g.,
+    # gettext.NullTranslations() becomes "<gettext.NullTranslations object at
+    # 0x7f...>". str() runs the class's __str__, which can raise.
+    try:
+        return str(obj)
+    except Exception:
+        return f"<{type(obj).__qualname__} object>"
 
 
 def default_serializer(obj: Any) -> Any:
