@@ -477,6 +477,156 @@ export class PythonProgram extends AbstractProgram {
         };
       }
     }
+
+    // 3. Assignment-style aliases: `R: TypeAlias = X` and `R = X`.
+    // Registering these with the other types lets other modules import them.
+    // A `TypeAlias` annotation marks any value as a type, including a quoted
+    // forward reference such as `R: TypeAlias = "int | str"`. A plain
+    // assignment `R = X` is registered only when X is unmistakably a type, so
+    // that an ordinary variable such as `FLAGS = READ | WRITE` is not taken
+    // for a type alias.
+    const isTypeAliasAnnotation = (node: Parser.Node): boolean =>
+      ["TypeAlias", "typing.TypeAlias", "typing_extensions.TypeAlias"].includes(
+        node.text
+      ) || this._imports.identifiers[node.text]?.imported === "TypeAlias";
+
+    // Generics whose subscript is unmistakably a type, e.g. `list[int]`.
+    const typeGenerics = new Set([
+      "Union",
+      "Optional",
+      "Literal",
+      "Annotated",
+      "Callable",
+      "Type",
+      "type",
+      "list",
+      "List",
+      "Sequence",
+      "MutableSequence",
+      "Iterable",
+      "Iterator",
+      "Collection",
+      "set",
+      "Set",
+      "frozenset",
+      "FrozenSet",
+      "dict",
+      "Dict",
+      "Mapping",
+      "MutableMapping",
+      "tuple",
+      "Tuple",
+    ]);
+    // Builtin types that can be operands of a `|` union, e.g. `int | None`.
+    const builtinTypes = new Set([
+      "int",
+      "float",
+      "complex",
+      "str",
+      "bool",
+      "bytes",
+      "bytearray",
+      "object",
+    ]);
+    // Class names are CapWords (`Circle`); constants are ALL_CAPS (`READ`).
+    const isClassName = (name: string): boolean =>
+      /^[A-Z]/.test(name) && /[a-z]/.test(name);
+
+    // Whether an expression is unmistakably a type: a generic subscript such
+    // as `list[int]`, or a `|` union whose operands are None, builtin types,
+    // class names (`Circle`, `shapes.Circle`) or other such types.
+    const isTypeExpression = (node: Parser.Node): boolean => {
+      switch (node.type) {
+        case "subscript": {
+          const base = node.childForFieldName("value")?.text.split(".").at(-1);
+          return base !== undefined && typeGenerics.has(base);
+        }
+        case "binary_operator":
+          return (
+            node.childForFieldName("operator")?.type === "|" &&
+            [
+              node.childForFieldName("left"),
+              node.childForFieldName("right"),
+            ].every((operand) => {
+              if (!operand) return false;
+              switch (operand.type) {
+                case "none":
+                  return true;
+                case "identifier":
+                  return (
+                    builtinTypes.has(operand.text) || isClassName(operand.text)
+                  );
+                case "attribute":
+                  return isClassName(
+                    operand.childForFieldName("attribute")?.text ?? ""
+                  );
+                default:
+                  return isTypeExpression(operand);
+              }
+            })
+          );
+        default:
+          return false;
+      }
+    };
+
+    // The expression inside a quoted forward reference, e.g. `int | str` in
+    // `"int | str"`, or undefined for an empty, escaped or f-string.
+    const parseQuotedType = (node: Parser.Node): Parser.Node | undefined => {
+      const parts = Parser.getNamedChildrenNoComments(node).filter(
+        (c) => c.type !== "string_start" && c.type !== "string_end"
+      );
+      const [content] = parts;
+      if (
+        parts.length !== 1 ||
+        content.type !== "string_content" ||
+        content.namedChildCount > 0
+      ) {
+        return undefined;
+      }
+      const statements = Parser.getNamedChildrenNoComments(
+        Parser.parse("python", content.text)?.rootNode
+      );
+      const [statement] = statements;
+      if (
+        statements.length !== 1 ||
+        statement.type !== "expression_statement"
+      ) {
+        return undefined;
+      }
+      return Parser.getFirstNamedChildNoComments(statement) ?? undefined;
+    };
+
+    for (const expressionNode of Parser.getNamedChildrenNoComments(
+      ast.rootNode
+    ).filter((node) => node.type === "expression_statement")) {
+      for (const assignmentNode of expressionNode.children.filter(
+        (node) => node.type === "assignment"
+      )) {
+        const left = assignmentNode.childForFieldName("left");
+        const right = assignmentNode.childForFieldName("right");
+        const annotation = assignmentNode.childForFieldName("type");
+        // A type registered above (e.g., a functional TypedDict) is kept.
+        if (!left || !right || left.type !== "identifier" || left.text in types)
+          continue;
+
+        let valueNode: Parser.Node | undefined;
+        if (annotation) {
+          if (!isTypeAliasAnnotation(annotation)) continue;
+          valueNode = right.type === "string" ? parseQuotedType(right) : right;
+        } else if (isTypeExpression(right)) {
+          valueNode = right;
+        }
+        if (!valueNode) continue;
+
+        try {
+          types[left.text] = this._getTypeRefFromAstNode(valueNode);
+        } catch {
+          // A value NaNofuzz cannot read as a type is left unregistered, so
+          // a parameter annotated with the alias reports an unknown type.
+        }
+      }
+    }
     return types;
   }
 

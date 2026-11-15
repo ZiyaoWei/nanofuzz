@@ -6,6 +6,7 @@ import { PythonProgram } from "./PythonProgram";
 import seedrandom from "seedrandom";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import * as Parser from "../../adapters/ParserAdapter";
 
 class InspectablePythonProgram extends PythonProgram {
@@ -790,6 +791,117 @@ def test_something(x: int):
     expect(program.functionsNotSupported["f"].reason).toMatch(
       /^Unknown type 'Missing' in module '.*': not a supported type, a type alias, or an import$/
     );
+  });
+
+  describe("assignment-style type aliases", () => {
+    // Returns the resolved type of the parameter `x` in `def f(x: <annotation>)`
+    // that follows the module-level code `source`.
+    const paramType = (source: string, annotation = "R") =>
+      ProgramFactory.fromSource(
+        () => `${source}\n\ndef f(x: ${annotation}) -> None:\n    pass`,
+        "python"
+      ).functionsExported["f"]?.getRef().args?.[0].type;
+    // Returns the names of the types that the module-level code defines.
+    const typeNames = (source: string) =>
+      Object.keys(ProgramFactory.fromSource(() => source, "python").types);
+
+    for (const [spelling, source] of [
+      ["`TypeAlias`", "from typing import TypeAlias\nR: TypeAlias = int | str"],
+      ["`typing.TypeAlias`", "import typing\nR: typing.TypeAlias = int | str"],
+      [
+        "`typing_extensions.TypeAlias`",
+        "import typing_extensions\nR: typing_extensions.TypeAlias = int | str",
+      ],
+      [
+        "an imported alias of `TypeAlias`",
+        "from typing import TypeAlias as TA\nR: TA = int | str",
+      ],
+    ]) {
+      it(`resolves an alias annotated with ${spelling}`, () => {
+        expect(paramType(source)).toEqual(paramType("", "int | str"));
+      });
+    }
+
+    it("resolves a quoted `TypeAlias` value", () => {
+      expect(
+        paramType(`from typing import TypeAlias\nR: TypeAlias = "int | str"`)
+      ).toEqual(paramType("", "int | str"));
+    });
+
+    it("resolves a bare type name annotated with `TypeAlias`", () => {
+      expect(
+        paramType("from typing import TypeAlias\nR: TypeAlias = int")
+      ).toEqual(paramType("", "int"));
+    });
+
+    it("resolves a plain alias", () => {
+      expect(paramType("R = int | str")).toEqual(paramType("", "int | str"));
+    });
+
+    for (const source of [
+      "R = int | None",
+      "R = Circle | Square",
+      "R = shapes.Circle | shapes.Square",
+      "R = list[int] | None",
+      "R = list[int]",
+      "R = Union[int, str]",
+      "R = typing.Union[int, str]",
+    ]) {
+      it(`takes \`${source}\` as a type alias`, () => {
+        expect(typeNames(source)).toEqual(["R"]);
+      });
+    }
+
+    for (const source of [
+      "FLAGS = READ | WRITE",
+      "MASK = masks[0] | masks[1]",
+      "R = int",
+      'R = "int | str"',
+      'KIND: str = "int"',
+    ]) {
+      it(`does not take \`${source}\` as a type alias`, () => {
+        expect(typeNames(source)).toEqual([]);
+      });
+    }
+
+    it("keeps a functional TypedDict over a later assignment", () => {
+      const types = ProgramFactory.fromSource(
+        () => `from typing import TypedDict
+Point = TypedDict("Point", {"x": int})
+Point = dict[str, int]`,
+        "python"
+      ).types;
+
+      expect(types["Point"].type?.type).toEqual(ArgTag.OBJECT);
+    });
+
+    it("resolves an alias imported from another module", () => {
+      const files: Record<string, string> = {
+        "aliases.py":
+          "from typing import TypeAlias\n\nR: TypeAlias = int | str\n",
+        "user.py":
+          "from aliases import R\n\n\ndef f(x: R) -> None:\n    pass\n",
+      };
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nanofuzz-"));
+      try {
+        for (const [name, source] of Object.entries(files)) {
+          fs.writeFileSync(path.join(dir, name), source);
+        }
+        const user = path.join(dir, "user.py");
+        const x = new PythonProgram(
+          () => fs.readFileSync(user, "utf8"),
+          user
+        ).functionsExported["f"]?.getArgDefs()[0];
+
+        expect(x?.getType()).toEqual(ArgTag.UNION);
+        expect(x?.getChildren().map((child) => child.getType())).toEqual([
+          ArgTag.NUMBER,
+          ArgTag.STRING,
+        ]);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   it("finds decorated functions without changing their signature", () => {
