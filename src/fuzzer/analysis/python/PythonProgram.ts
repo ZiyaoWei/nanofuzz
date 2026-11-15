@@ -3388,7 +3388,7 @@ export class PythonProgram extends AbstractProgram {
       }
       if (importName === "") {
         throw new Error(
-          `Internal error: ${this._filename} did not find local import for ${typeRef.typeRefName}`
+          `Unknown type '${typeRef.typeRefName}' in module '${this._filename}': not a supported type, a type alias, or an import`
         );
       }
       const importRef = this._imports.identifiers[importName];
