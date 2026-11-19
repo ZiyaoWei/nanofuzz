@@ -43,6 +43,7 @@ import {
 import { synthesizeValidator } from "../fuzzer/synthesis/ValidatorSynthesizer";
 import { synthesizeTransformer } from "../fuzzer/synthesis/TransformerSynthesizer";
 import { synthesizeUserGenerator } from "../fuzzer/synthesis/UserGeneratorSynthesizer";
+import { FuzzerCodeSnippet } from "../fuzzer/synthesis/Types";
 import { FuzzConfigStore, CURR_FILE_FMT_VER } from "../fuzzer/FuzzConfigStore";
 
 /**
@@ -872,6 +873,55 @@ export class FuzzPanel {
   } // fn: _doStaleNotify
 
   /**
+   * Writes a synthesized companion function skeleton (validator, transformer,
+   * or user generator) to the module's source file: prepends any imports the
+   * module lacks and appends the skeleton.
+   *
+   * @param module Path of the module source file
+   * @param program Parsed program for the module
+   * @param imports Imports required by the skeleton
+   * @param skeleton Code skeleton to append
+   */
+  private _writeCompanionToSource(
+    module: string,
+    program: AbstractProgram,
+    imports: FuzzerCodeSnippet["imports"],
+    skeleton: string
+  ): void {
+    let importData = "";
+    imports.forEach((i) => {
+      // If there is no import, then add it
+      if (!Object.keys(program.imports).some((e) => e === i.name)) {
+        importData += i.stmt;
+      }
+    });
+
+    if (importData.length) {
+      // Pre-pend the import & append the skeleton
+      const fileData = fs.readFileSync(module);
+      const importStmt = Buffer.from(importData);
+      const skeletonFn = Buffer.from(skeleton);
+      const fd = fs.openSync(module, "w+");
+
+      fs.writeSync(fd, importStmt, 0, importStmt.length, 0);
+      fs.writeSync(fd, fileData, 0, fileData.length, importStmt.length);
+      fs.writeSync(
+        fd,
+        skeletonFn,
+        0,
+        skeletonFn.length,
+        importStmt.length + fileData.length
+      );
+      fs.closeSync(fd);
+    } else {
+      // Append the skeleton to the end of the file
+      const fd = fs.openSync(module, "as+");
+      fs.writeFileSync(fd, skeleton);
+      fs.closeSync(fd);
+    }
+  } // fn: _writeCompanionToSource
+
+  /**
    * Add code skeleton for a property validator to the program source code.
    */
   private async _doAddValidatorCmd() {
@@ -903,37 +953,7 @@ export class FuzzPanel {
 
     // Append the code skeleton to the source file
     try {
-      let importData = "";
-      imports.forEach((i) => {
-        // If there is no import, then add it
-        if (!Object.keys(program.imports).some((e) => e === i.name)) {
-          importData += i.stmt;
-        }
-      });
-
-      if (importData.length) {
-        // Pre-pend the import & append the validator
-        const fileData = fs.readFileSync(module);
-        const importStmt = Buffer.from(importData);
-        const validatorFn = Buffer.from(skeleton);
-        const fd = fs.openSync(module, "w+");
-
-        fs.writeSync(fd, importStmt, 0, importStmt.length, 0);
-        fs.writeSync(fd, fileData, 0, fileData.length, importStmt.length);
-        fs.writeSync(
-          fd,
-          validatorFn,
-          0,
-          validatorFn.length,
-          importStmt.length + fileData.length
-        );
-        fs.closeSync(fd);
-      } else {
-        // Append the validator to the end of the file
-        const fd = fs.openSync(module, "as+");
-        fs.writeFileSync(fd, skeleton);
-        fs.closeSync(fd);
-      }
+      this._writeCompanionToSource(module, program, imports, skeleton);
 
       // Change focus and scroll to the generated validator
       try {
@@ -1000,36 +1020,7 @@ export class FuzzPanel {
 
     // Append the code skeleton to the source file
     try {
-      let importData = "";
-      imports.forEach((i) => {
-        // If there is no import, then add it
-        if (!Object.keys(program.imports).some((e) => e === i.name)) {
-          importData += i.stmt;
-        }
-      });
-
-      if (importData.length) {
-        // Pre-pend the import & append the transformer
-        const fileData = fs.readFileSync(module);
-        const importStmt = Buffer.from(importData);
-        const transformerFn = Buffer.from(skeleton);
-        const fd = fs.openSync(module, "w+");
-
-        fs.writeSync(fd, importStmt, 0, importStmt.length, 0);
-        fs.writeSync(fd, fileData, 0, fileData.length, importStmt.length);
-        fs.writeSync(
-          fd,
-          transformerFn,
-          0,
-          transformerFn.length,
-          importStmt.length + fileData.length
-        );
-        fs.closeSync(fd);
-      } else {
-        const fd = fs.openSync(module, "as+");
-        fs.writeFileSync(fd, skeleton);
-        fs.closeSync(fd);
-      }
+      this._writeCompanionToSource(module, program, imports, skeleton);
 
       // Change focus to the generated transformer
       try {
@@ -1087,35 +1078,7 @@ export class FuzzPanel {
 
     // Append the code skeleton to the source file
     try {
-      let importData = "";
-      imports.forEach((i) => {
-        // If there is no import, then add it
-        if (!Object.keys(program.imports).some((e) => e === i.name)) {
-          importData += i.stmt;
-        }
-      });
-
-      if (importData.length) {
-        const fileData = fs.readFileSync(module);
-        const importStmt = Buffer.from(importData);
-        const userGenFn = Buffer.from(skeleton);
-        const fd = fs.openSync(module, "w+");
-
-        fs.writeSync(fd, importStmt, 0, importStmt.length, 0);
-        fs.writeSync(fd, fileData, 0, fileData.length, importStmt.length);
-        fs.writeSync(
-          fd,
-          userGenFn,
-          0,
-          userGenFn.length,
-          importStmt.length + fileData.length
-        );
-        fs.closeSync(fd);
-      } else {
-        const fd = fs.openSync(module, "as+");
-        fs.writeFileSync(fd, skeleton);
-        fs.closeSync(fd);
-      }
+      this._writeCompanionToSource(module, program, imports, skeleton);
 
       // Change focus to the generated user generator
       try {
