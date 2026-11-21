@@ -44,6 +44,7 @@ import { synthesizeValidator } from "../fuzzer/synthesis/ValidatorSynthesizer";
 import { synthesizeTransformer } from "../fuzzer/synthesis/TransformerSynthesizer";
 import { synthesizeUserGenerator } from "../fuzzer/synthesis/UserGeneratorSynthesizer";
 import { FuzzerCodeSnippet } from "../fuzzer/synthesis/Types";
+import { insertIntoBytes } from "../fuzzer/synthesis/Util";
 import { FuzzConfigStore, CURR_FILE_FMT_VER } from "../fuzzer/FuzzConfigStore";
 
 /**
@@ -874,8 +875,9 @@ export class FuzzPanel {
 
   /**
    * Writes a synthesized companion function skeleton (validator, transformer,
-   * or user generator) to the module's source file: prepends any imports the
-   * module lacks and appends the skeleton.
+   * or user generator) to the module's source file: inserts any imports the
+   * module lacks where the module's language allows them, and appends the
+   * skeleton.
    *
    * @param module Path of the module source file
    * @param program Parsed program for the module
@@ -896,29 +898,14 @@ export class FuzzPanel {
       }
     });
 
-    if (importData.length) {
-      // Pre-pend the import & append the skeleton
-      const fileData = fs.readFileSync(module);
-      const importStmt = Buffer.from(importData);
-      const skeletonFn = Buffer.from(skeleton);
-      const fd = fs.openSync(module, "w+");
-
-      fs.writeSync(fd, importStmt, 0, importStmt.length, 0);
-      fs.writeSync(fd, fileData, 0, fileData.length, importStmt.length);
-      fs.writeSync(
-        fd,
-        skeletonFn,
-        0,
-        skeletonFn.length,
-        importStmt.length + fileData.length
-      );
-      fs.closeSync(fd);
-    } else {
-      // Append the skeleton to the end of the file
-      const fd = fs.openSync(module, "as+");
-      fs.writeFileSync(fd, skeleton);
-      fs.closeSync(fd);
-    }
+    const fileData = fs.readFileSync(module);
+    fs.writeFileSync(
+      module,
+      Buffer.concat([
+        insertIntoBytes(fileData, program.importInsertionOffset, importData),
+        Buffer.from(skeleton),
+      ])
+    );
   } // fn: _writeCompanionToSource
 
   /**
@@ -928,6 +915,14 @@ export class FuzzPanel {
     const fn = this._fuzzEnv.function; // Function under test
     const module = this._fuzzEnv.function.getModule();
     let program: AbstractProgram;
+
+    // Save the editor if dirty: imports are inserted at a line found by
+    // parsing the file, so the parse must include the unsaved edits
+    for (const editor of vscode.window.visibleTextEditors) {
+      if (editor.document.fileName === module && editor.document.isDirty) {
+        await editor.document.save();
+      }
+    }
 
     try {
       program = ProgramFactory.fromFile(module);
@@ -943,13 +938,6 @@ export class FuzzPanel {
       skeleton,
       imports,
     } = synthesizeValidator(fn, program.lang, Object.keys(program.functions));
-
-    // Save the editor if dirty
-    for (const editor of vscode.window.visibleTextEditors) {
-      if (editor.document.fileName === module && editor.document.isDirty) {
-        await editor.document.save();
-      }
-    }
 
     // Append the code skeleton to the source file
     try {
@@ -979,6 +967,14 @@ export class FuzzPanel {
     const fn = this._fuzzEnv.function; // Function under test
     const module = this._fuzzEnv.function.getModule();
     let program: AbstractProgram;
+
+    // Save the editor if dirty: imports are inserted at a line found by
+    // parsing the file, so the parse must include the unsaved edits
+    for (const editor of vscode.window.visibleTextEditors) {
+      if (editor.document.fileName === module && editor.document.isDirty) {
+        await editor.document.save();
+      }
+    }
 
     try {
       program = ProgramFactory.fromFile(module);
@@ -1011,13 +1007,6 @@ export class FuzzPanel {
       imports,
     } = synthesizeTransformer(fn, program.lang, Object.keys(program.functions));
 
-    // Save the editor
-    for (const editor of vscode.window.visibleTextEditors) {
-      if (editor.document.fileName === module && editor.document.isDirty) {
-        await editor.document.save();
-      }
-    }
-
     // Append the code skeleton to the source file
     try {
       this._writeCompanionToSource(module, program, imports, skeleton);
@@ -1049,6 +1038,14 @@ export class FuzzPanel {
     const module = this._fuzzEnv.function.getModule();
     let program: AbstractProgram;
 
+    // Save the editor if dirty: imports are inserted at a line found by
+    // parsing the file, so the parse must include the unsaved edits
+    for (const editor of vscode.window.visibleTextEditors) {
+      if (editor.document.fileName === module && editor.document.isDirty) {
+        await editor.document.save();
+      }
+    }
+
     try {
       program = ProgramFactory.fromFile(module);
     } catch (e: unknown) {
@@ -1068,13 +1065,6 @@ export class FuzzPanel {
       program.lang,
       Object.keys(program.functions)
     );
-
-    // Save the editor
-    for (const editor of vscode.window.visibleTextEditors) {
-      if (editor.document.fileName === module && editor.document.isDirty) {
-        await editor.document.save();
-      }
-    }
 
     // Append the code skeleton to the source file
     try {

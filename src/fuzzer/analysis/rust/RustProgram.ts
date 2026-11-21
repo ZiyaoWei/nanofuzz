@@ -14,6 +14,7 @@ import {
   ProgramLanguage,
 } from "../Types";
 import { getErrorMessageOrJson } from "../../Util";
+import { getNextLineOffset } from "../Util";
 import * as ProgramFactory from "../ProgramFactory";
 import * as JSONN from "../../../Jsonn";
 import * as Parser from "../../adapters/ParserAdapter";
@@ -388,6 +389,26 @@ export class RustProgram extends AbstractProgram {
 
     return imports;
   } // fn: _findImports
+
+  /**
+   * Returns the offset at which new imports may be inserted: after inner
+   * attributes (`#![allow(dead_code)]`) and inner doc comments
+   * (`//! Utilities.`), which must come before any items such as `use`.
+   *
+   * @returns offset at which new imports may be inserted
+   */
+  protected _findImportInsertionOffset(): number {
+    const ends = (this._ast?.rootNode.namedChildren ?? [])
+      .filter(
+        (node) =>
+          node.type === "inner_attribute_item" ||
+          node.namedChildren.some(
+            (child) => child.type === "inner_doc_comment_marker"
+          )
+      )
+      .map((node) => node.endIndex);
+    return ends.length ? getNextLineOffset(this._src, Math.max(...ends)) : 0;
+  } // fn: _findImportInsertionOffset
 
   protected _findTypes(): Record<IdentifierName, TypeRef> {
     const types: Record<IdentifierName, TypeRef> = {};

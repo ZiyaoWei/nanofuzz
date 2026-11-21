@@ -505,6 +505,16 @@ export class OxcamlProgram extends AbstractProgram {
   } // fn: _findImports
 
   /**
+   * Returns the offset at which new imports may be inserted: the start of
+   * the file, as nothing must come before `open` statements.
+   *
+   * @returns offset at which new imports may be inserted
+   */
+  protected _findImportInsertionOffset(): number {
+    return 0;
+  } // fn: _findImportInsertionOffset
+
+  /**
    * Extracts type definitions (aliases, records, variants) defined in the source file.
    *
    * @returns A dictionary of type names to TypeRef objects

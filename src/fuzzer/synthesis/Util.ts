@@ -33,3 +33,36 @@ export function getIdentifierNameAvoidingConflicts(
 
   return { name: "r_conflicted", generated: true };
 } // fn: getIdentifierNameAvoidingConflicts
+
+/**
+ * Returns a file's bytes with `text` inserted at the start of a line, keeping
+ * all other bytes as they are.
+ *
+ * Writing back the file's decoded source instead would replace bytes that
+ * are not valid UTF-8: e.g., `é` in a Latin-1 file (the byte 0xE9) would
+ * become `�`.
+ *
+ * @param bytes Contents of the file
+ * @param offset Offset of the line's start in the file decoded as UTF-8
+ * (e.g., in `AbstractProgram.src`)
+ * @param text Text to insert
+ * @returns The file's contents with `text` inserted
+ */
+export function insertIntoBytes(
+  bytes: Buffer,
+  offset: number,
+  text: string
+): Buffer {
+  // Decoding keeps newlines as they are, so the line has as many newlines
+  // before it in the bytes as in the decoded source
+  const lineIndex = bytes.toString().slice(0, offset).split("\n").length - 1;
+  let byteOffset = 0;
+  for (let i = 0; i < lineIndex; i++) {
+    byteOffset = bytes.indexOf("\n", byteOffset) + 1;
+  }
+  return Buffer.concat([
+    bytes.subarray(0, byteOffset),
+    Buffer.from(text),
+    bytes.subarray(byteOffset),
+  ]);
+} // fn: insertIntoBytes
