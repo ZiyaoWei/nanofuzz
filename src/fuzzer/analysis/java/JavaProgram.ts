@@ -14,6 +14,7 @@ import {
   ProgramLanguage,
 } from "../Types";
 import { getErrorMessageOrJson } from "../../Util";
+import { getNextLineOffset } from "../Util";
 import * as ProgramFactory from "../ProgramFactory";
 import * as JSONN from "../../../Jsonn";
 import * as Parser from "../../adapters/ParserAdapter";
@@ -558,6 +559,19 @@ export class JavaProgram extends AbstractProgram {
 
     return imports;
   } // fn: _findImports
+
+  /**
+   * Returns the offset at which new imports may be inserted: after the
+   * package declaration (`package com.example;`), which must come first.
+   *
+   * @returns offset at which new imports may be inserted
+   */
+  protected _findImportInsertionOffset(): number {
+    const packageDecl = this._ast?.rootNode.namedChildren.find(
+      (node) => node.type === "package_declaration"
+    );
+    return packageDecl ? getNextLineOffset(this._src, packageDecl.endIndex) : 0;
+  } // fn: _findImportInsertionOffset
 
   /**
    * Discovers and extracts class, record, interface, and enum types defined in the program.

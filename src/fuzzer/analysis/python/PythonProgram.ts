@@ -23,7 +23,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { PythonRunner } from "../../runners/python/PythonRunner";
 import { ArgDef } from "../ArgDef";
-import { isArgType } from "../Util";
+import { getNextLineOffset, isArgType } from "../Util";
 import { FuzzOptions } from "../../Types";
 
 export class PythonProgram extends AbstractProgram {
@@ -218,6 +218,39 @@ export class PythonProgram extends AbstractProgram {
 
     return imports;
   }
+
+  /**
+   * Returns the offset at which new imports may be inserted: after a
+   * shebang (`#!/usr/bin/env python3`), the module docstring
+   * (`"""Utilities."""`), and `from __future__` imports. Imports placed
+   * before these break them: `from __future__` imports must come first, a
+   * docstring after an import is not the module's `__doc__`, and a shebang
+   * only works on the first line.
+   *
+   * Note: encoding declarations (`# -*- coding: latin-1 -*-`) are not kept
+   * first, as they do not come up in fuzzed modules in practice.
+   *
+   * @returns offset at which new imports may be inserted
+   */
+  protected _findImportInsertionOffset(): number {
+    const nodes = this._ast?.rootNode.namedChildren ?? [];
+    const shebang = nodes.find(
+      (node) => node.startIndex === 0 && node.text.startsWith("#!")
+    );
+    const firstStatement = nodes.find((node) => node.type !== "comment");
+    const docstring =
+      firstStatement?.type === "expression_statement" &&
+      firstStatement.namedChildren.length === 1 &&
+      firstStatement.namedChildren[0].type === "string"
+        ? firstStatement
+        : undefined;
+    const ends = [
+      shebang,
+      docstring,
+      ...nodes.filter((node) => node.type === "future_import_statement"),
+    ].flatMap((node) => (node ? [node.endIndex] : []));
+    return ends.length ? getNextLineOffset(this._src, Math.max(...ends)) : 0;
+  } // fn: _findImportInsertionOffset
 
   /**
    * Resolves a Python module reference to an on-disk `.py` file path.

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/switch-exhaustiveness-check */
 import * as JSONN from "../../../Jsonn";
 import * as ValueMapper from "../../mappers/ValueMapper";
-import { removeParents } from "../Util";
+import { getNextLineOffset, removeParents } from "../Util";
 import { parse, ParseResult } from "@babel/parser";
 import _traverse, { NodePath } from "@babel/traverse";
 import {
@@ -181,6 +181,20 @@ export class TypescriptProgram extends AbstractProgram {
     }); // traverse AST
     return imports;
   } // fn: findImports()
+
+  /**
+   * Returns the offset at which new imports may be inserted: after a
+   * shebang (`#!/usr/bin/env node`), which must be on the first line.
+   *
+   * Note: directives (`"use client"`) are not kept first, as they do not
+   * come up in fuzzed modules in practice.
+   *
+   * @returns offset at which new imports may be inserted
+   */
+  protected _findImportInsertionOffset(): number {
+    const shebangEnd = this._ast?.program.interpreter?.end;
+    return shebangEnd ? getNextLineOffset(this._src, shebangEnd) : 0;
+  } // fn: _findImportInsertionOffset
 
   /**
    * Accepts a program AST and returns a default type export if defined

@@ -75,6 +75,7 @@ export abstract class AbstractProgram {
   } = { functions: {}, types: {} }; // Supported exports of the program
   protected _types: Record<IdentifierName, TypeRef> = {}; // Types defined in the program
   protected _imports: ProgramImports = { programs: {}, identifiers: {} }; // Imported modules
+  protected _importInsertionOffset = 0; // Offset at which new imports may be inserted
 
   /**
    * Constructs a new ProgramDef instance using a FunctionRef object.
@@ -117,6 +118,9 @@ export abstract class AbstractProgram {
 
     // Retrieve the imports defined in this program
     this._imports = this._findImports();
+
+    // Find where new imports may be inserted
+    this._importInsertionOffset = this._findImportInsertionOffset();
 
     // Extract local types
     this._types = this._findTypes();
@@ -220,6 +224,8 @@ export abstract class AbstractProgram {
 
   protected abstract _findImports(): ProgramImports;
 
+  protected abstract _findImportInsertionOffset(): number;
+
   protected abstract _findTypes(): Record<IdentifierName, TypeRef>;
 
   protected abstract _findFunctions(): typeof this._functions;
@@ -316,6 +322,17 @@ export abstract class AbstractProgram {
   public get imports(): Record<IdentifierName, ProgramImport> {
     return structuredClone(this._imports.identifiers);
   } // fn: get imports()
+
+  /**
+   * Returns the offset in the source at which new imports may be inserted:
+   * the start of the line after the code that must come first in the file,
+   * e.g., after `package main` in Go, or 0 if there is no such code.
+   *
+   * @returns offset at which new imports may be inserted
+   */
+  public get importInsertionOffset(): number {
+    return this._importInsertionOffset;
+  } // fn: get importInsertionOffset()
 
   /**
    * Returns supported functions defined in the program

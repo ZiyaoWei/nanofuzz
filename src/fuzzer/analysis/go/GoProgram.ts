@@ -14,6 +14,7 @@ import {
 import * as Parser from "../../adapters/ParserAdapter";
 import { ArgDef } from "../ArgDef";
 import { findInAncestor, getErrorMessageOrJson } from "../../Util";
+import { getNextLineOffset } from "../Util";
 import * as JSONN from "../../../Jsonn";
 
 export class GoProgram extends AbstractProgram {
@@ -403,6 +404,21 @@ export class GoProgram extends AbstractProgram {
 
     return imports;
   } // fn: _findImports
+
+  /**
+   * Returns the offset at which new imports may be inserted: after the
+   * package clause (`package main`), which must come first.
+   *
+   * @returns offset at which new imports may be inserted
+   */
+  protected _findImportInsertionOffset(): number {
+    const packageClause = this._ast?.rootNode.namedChildren.find(
+      (node) => node.type === "package_clause"
+    );
+    return packageClause
+      ? getNextLineOffset(this._src, packageClause.endIndex)
+      : 0;
+  } // fn: _findImportInsertionOffset
 
   protected _findTypes(): Record<IdentifierName, TypeRef> {
     const types: Record<IdentifierName, TypeRef> = {};

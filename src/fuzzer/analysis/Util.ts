@@ -114,3 +114,20 @@ export function bigIntOrThrow(value: ArgType): bigint {
   }
   return value;
 } // fn: bigIntOrThrow()
+
+/**
+ * Returns the offset of the start of the line after code that ends at
+ * `end`: e.g., in `package main\nimport "fmt"\n`, `package main` ends at
+ * 12 and the next line starts at 13.
+ *
+ * Note: for code that includes its trailing newline, such as a Rust `//!`
+ * comment, `end` is already the start of the next line and is returned
+ * unchanged. If no newline follows `end`, returns 0.
+ *
+ * @param src Source code
+ * @param end Offset just past the end of the code
+ * @returns Offset of the start of the next line
+ */
+export function getNextLineOffset(src: string, end: number): number {
+  return src.indexOf("\n", end - 1) + 1;
+} // fn: getNextLineOffset
